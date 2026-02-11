@@ -4,9 +4,9 @@ import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
     ArrowLeft, Save, Download, Eye, EyeOff, CheckCircle2,
-    Loader2, XCircle, Clock, RotateCcw, Circle
+    Loader2, ChevronLeft, ChevronRight
 } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 
 interface SubtitleLine {
     id: number;
@@ -15,100 +15,43 @@ interface SubtitleLine {
     burmese: string;
 }
 
-interface BatchDetail {
-    batchIndex: number;
-    startLine: number;
-    endLine: number;
-    linesCount: number;
-    status: "queued" | "processing" | "complete" | "failed";
-}
-
-interface TranslationProgress {
-    translationStatus: "processing" | "complete" | "cancelled" | "failed";
-    totalBatches: number;
-    completedBatches: number;
-    currentBatch: number;
-    batchDetails: BatchDetail[];
-    movieTitle: string;
-}
+const LINES_PER_PAGE = 50;
 
 export default function Editor() {
     const params = useParams();
     const id = params?.id;
     const router = useRouter();
 
-    // Editor state
     const [movieTitle, setMovieTitle] = useState("");
     const [lines, setLines] = useState<SubtitleLine[]>([]);
+    const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [showOriginal, setShowOriginal] = useState(false);
     const [lastSaved, setLastSaved] = useState<Date | null>(null);
 
-    // Progress state
-    const [progress, setProgress] = useState<TranslationProgress | null>(null);
-    const [isTranslating, setIsTranslating] = useState(true);
-    const [initialLoading, setInitialLoading] = useState(true);
-
-    // Poll for translation progress
-    const pollProgress = useCallback(async () => {
-        if (!id) return;
-        try {
-            const res = await fetch(`/api/translate/status/${id}`);
-            const data: TranslationProgress = await res.json();
-            setProgress(data);
-            setMovieTitle(data.movieTitle);
-
-            if (data.translationStatus === "complete" || !data.translationStatus) {
-                // Translation done — load the full subtitle data
-                setIsTranslating(false);
-                const subRes = await fetch(`/api/subtitles/${id}`);
-                const subData = await subRes.json();
-                setLines(subData.lines || []);
-                setInitialLoading(false);
-            } else if (data.translationStatus === "cancelled" || data.translationStatus === "failed") {
-                setIsTranslating(false);
-                setInitialLoading(false);
-            } else {
-                setInitialLoading(false);
-            }
-        } catch (error) {
-            console.error("Failed to poll progress:", error);
-            setInitialLoading(false);
-        }
-    }, [id]);
+    // Pagination
+    const [currentPage, setCurrentPage] = useState(1);
+    const totalPages = Math.ceil(lines.length / LINES_PER_PAGE);
+    const startIdx = (currentPage - 1) * LINES_PER_PAGE;
+    const endIdx = startIdx + LINES_PER_PAGE;
+    const currentLines = lines.slice(startIdx, endIdx);
 
     useEffect(() => {
-        if (!id) return;
-        pollProgress(); // Initial poll
+        if (id) fetchSubtitle();
+    }, [id]);
 
-        const interval = setInterval(() => {
-            if (isTranslating) {
-                pollProgress();
-            }
-        }, 2000); // Poll every 2 seconds
-
-        return () => clearInterval(interval);
-    }, [id, isTranslating, pollProgress]);
-
-    const handleCancel = async () => {
-        if (!id) return;
+    const fetchSubtitle = async () => {
         try {
-            await fetch(`/api/translate/status/${id}`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ action: "cancel" }),
-            });
-            setIsTranslating(false);
-            if (progress) {
-                setProgress({ ...progress, translationStatus: "cancelled" });
-            }
+            const res = await fetch(`/api/subtitles/${id}`);
+            const data = await res.json();
+            if (data.error) throw new Error(data.error);
+            setMovieTitle(data.movieTitle);
+            setLines(data.lines || []);
         } catch (error) {
-            console.error("Failed to cancel:", error);
+            console.error("Failed to fetch subtitle:", error);
+        } finally {
+            setLoading(false);
         }
-    };
-
-    const handleRetry = () => {
-        router.push("/");
     };
 
     const handleLineChange = (lineId: number, value: string) => {
@@ -152,8 +95,30 @@ export default function Editor() {
         }
     };
 
-    // === LOADING SCREEN ===
-    if (initialLoading) {
+    const goToPage = (page: number) => {
+        if (page < 1 || page > totalPages) return;
+        setCurrentPage(page);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+    };
+
+    // Generate visible page numbers
+    const getPageNumbers = () => {
+        const pages: (number | string)[] = [];
+        if (totalPages <= 7) {
+            for (let i = 1; i <= totalPages; i++) pages.push(i);
+        } else {
+            pages.push(1);
+            if (currentPage > 3) pages.push("...");
+            for (let i = Math.max(2, currentPage - 1); i <= Math.min(totalPages - 1, currentPage + 1); i++) {
+                pages.push(i);
+            }
+            if (currentPage < totalPages - 2) pages.push("...");
+            pages.push(totalPages);
+        }
+        return pages;
+    };
+
+    if (loading) {
         return (
             <div className="min-h-screen flex items-center justify-center">
                 <Loader2 className="animate-spin size-8 text-blue-500" />
@@ -161,178 +126,6 @@ export default function Editor() {
         );
     }
 
-    // === PROGRESS TRACKER SCREEN ===
-    if (isTranslating && progress) {
-        const percentComplete = progress.totalBatches > 0
-            ? Math.round((progress.completedBatches / progress.totalBatches) * 100)
-            : 0;
-
-        return (
-            <div className="min-h-screen bg-[#070709]">
-                <div className="max-w-2xl mx-auto px-6 py-12">
-                    {/* Header */}
-                    <div className="flex items-center gap-4 mb-8">
-                        <button
-                            onClick={() => router.push("/")}
-                            className="p-2 hover:bg-white/10 rounded-lg transition-colors"
-                        >
-                            <ArrowLeft className="size-5" />
-                        </button>
-                        <div>
-                            <h1 className="font-semibold text-xl gradient-text">
-                                Translating to Burmese
-                            </h1>
-                            <p className="text-sm text-slate-500 mt-1">{movieTitle}</p>
-                        </div>
-                    </div>
-
-                    {/* Overall Progress Bar */}
-                    <div className="glass p-6 mb-6">
-                        <div className="flex items-center justify-between mb-3">
-                            <span className="text-sm font-medium text-slate-300">
-                                Overall Progress
-                            </span>
-                            <span className="text-sm font-mono text-blue-400">
-                                {percentComplete}%
-                            </span>
-                        </div>
-                        <div className="w-full h-3 bg-slate-800 rounded-full overflow-hidden">
-                            <motion.div
-                                className="h-full bg-gradient-to-r from-blue-600 to-indigo-500 rounded-full"
-                                initial={{ width: 0 }}
-                                animate={{ width: `${percentComplete}%` }}
-                                transition={{ duration: 0.5, ease: "easeOut" }}
-                            />
-                        </div>
-                        <p className="text-xs text-slate-500 mt-2">
-                            {progress.completedBatches} of {progress.totalBatches} batches completed
-                        </p>
-                    </div>
-
-                    {/* Batch List */}
-                    <div className="glass p-6 mb-6">
-                        <h2 className="text-sm font-semibold text-slate-300 mb-4 uppercase tracking-wider">
-                            Translation Batches
-                        </h2>
-                        <div className="space-y-2 max-h-[400px] overflow-y-auto pr-2">
-                            <AnimatePresence>
-                                {progress.batchDetails.map((batch) => (
-                                    <motion.div
-                                        key={batch.batchIndex}
-                                        initial={{ opacity: 0, y: 5 }}
-                                        animate={{ opacity: 1, y: 0 }}
-                                        transition={{ delay: batch.batchIndex * 0.03 }}
-                                        className={`flex items-center justify-between p-3 rounded-lg border transition-all ${batch.status === "processing"
-                                                ? "bg-blue-500/10 border-blue-500/30"
-                                                : batch.status === "complete"
-                                                    ? "bg-emerald-500/5 border-emerald-500/20"
-                                                    : batch.status === "failed"
-                                                        ? "bg-red-500/5 border-red-500/20"
-                                                        : "bg-slate-900/30 border-slate-800/40"
-                                            }`}
-                                    >
-                                        <div className="flex items-center gap-3">
-                                            {/* Status Icon */}
-                                            {batch.status === "processing" && (
-                                                <Loader2 className="size-4 text-blue-400 animate-spin" />
-                                            )}
-                                            {batch.status === "complete" && (
-                                                <CheckCircle2 className="size-4 text-emerald-400" />
-                                            )}
-                                            {batch.status === "failed" && (
-                                                <XCircle className="size-4 text-red-400" />
-                                            )}
-                                            {batch.status === "queued" && (
-                                                <Clock className="size-4 text-slate-600" />
-                                            )}
-
-                                            <div>
-                                                <span className="text-sm font-medium text-slate-200">
-                                                    Batch {batch.batchIndex + 1}
-                                                </span>
-                                                <span className="text-xs text-slate-500 ml-2">
-                                                    Lines {batch.startLine + 1}–{batch.endLine}
-                                                </span>
-                                            </div>
-                                        </div>
-
-                                        {/* Status Label */}
-                                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${batch.status === "processing"
-                                                ? "text-blue-400 bg-blue-500/20"
-                                                : batch.status === "complete"
-                                                    ? "text-emerald-400 bg-emerald-500/20"
-                                                    : batch.status === "failed"
-                                                        ? "text-red-400 bg-red-500/20"
-                                                        : "text-slate-500 bg-slate-800"
-                                            }`}>
-                                            {batch.status === "processing" ? "Translating..."
-                                                : batch.status === "complete" ? "Done"
-                                                    : batch.status === "failed" ? "Failed"
-                                                        : "Queued"}
-                                        </span>
-                                    </motion.div>
-                                ))}
-                            </AnimatePresence>
-                        </div>
-                    </div>
-
-                    {/* Action Buttons */}
-                    <div className="flex gap-3">
-                        <button
-                            onClick={handleCancel}
-                            className="flex-1 px-4 py-3 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 rounded-xl text-sm font-medium flex items-center justify-center gap-2 transition-all"
-                        >
-                            <XCircle className="size-4" />
-                            Cancel Translation
-                        </button>
-                    </div>
-
-                    {/* Animated Tip */}
-                    <motion.p
-                        className="text-center text-xs text-slate-600 mt-6"
-                        animate={{ opacity: [0.4, 1, 0.4] }}
-                        transition={{ duration: 3, repeat: Infinity }}
-                    >
-                        Translation is running in the background. Please don&apos;t close this page.
-                    </motion.p>
-                </div>
-            </div>
-        );
-    }
-
-    // === CANCELLED / FAILED STATE ===
-    if (progress && (progress.translationStatus === "cancelled" || progress.translationStatus === "failed")) {
-        return (
-            <div className="min-h-screen flex flex-col items-center justify-center gap-6">
-                <div className="text-center">
-                    <XCircle className="size-12 text-red-400 mx-auto mb-4" />
-                    <h2 className="text-xl font-semibold text-slate-200 mb-2">
-                        Translation {progress.translationStatus === "cancelled" ? "Cancelled" : "Failed"}
-                    </h2>
-                    <p className="text-sm text-slate-500">
-                        {progress.completedBatches} of {progress.totalBatches} batches were completed.
-                    </p>
-                </div>
-                <div className="flex gap-3">
-                    <button
-                        onClick={handleRetry}
-                        className="px-6 py-3 bg-blue-600 hover:bg-blue-500 rounded-xl text-sm font-medium flex items-center gap-2 transition-colors"
-                    >
-                        <RotateCcw className="size-4" />
-                        Try Again
-                    </button>
-                    <button
-                        onClick={() => router.push("/")}
-                        className="px-6 py-3 bg-slate-800 hover:bg-slate-700 rounded-xl text-sm font-medium transition-colors"
-                    >
-                        Go Home
-                    </button>
-                </div>
-            </div>
-        );
-    }
-
-    // === NO LINES FALLBACK ===
     if (!lines || lines.length === 0) {
         return (
             <div className="min-h-screen flex flex-col items-center justify-center gap-4">
@@ -347,9 +140,9 @@ export default function Editor() {
         );
     }
 
-    // === EDITOR VIEW ===
     return (
         <div className="min-h-screen bg-[#070709]">
+            {/* Header */}
             <div className="sticky top-0 z-50 glass rounded-none border-x-0 border-t-0 bg-slate-900/80 backdrop-blur-xl">
                 <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
                     <div className="flex items-center gap-4">
@@ -363,6 +156,8 @@ export default function Editor() {
                             <h1 className="font-semibold text-lg line-clamp-1">{movieTitle || "Untitled Movie"}</h1>
                             <div className="flex items-center gap-2">
                                 <span className="text-xs text-slate-500">{lines.length} lines</span>
+                                <span className="text-xs text-slate-600">•</span>
+                                <span className="text-xs text-slate-500">Page {currentPage}/{totalPages}</span>
                                 {lastSaved && (
                                     <span className="text-[10px] text-emerald-500 flex items-center gap-1">
                                         <CheckCircle2 className="size-3" />
@@ -380,7 +175,7 @@ export default function Editor() {
                                 }`}
                         >
                             {showOriginal ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                            {showOriginal ? "Hide English" : "Show English"}
+                            {showOriginal ? "Hide EN" : "Show EN"}
                         </button>
                         <button
                             onClick={handleSave}
@@ -401,13 +196,14 @@ export default function Editor() {
                 </div>
             </div>
 
-            <div className="max-w-5xl mx-auto p-6 space-y-4">
-                {lines.map((line, index) => (
+            {/* Subtitle Lines (current page only) */}
+            <div className="max-w-5xl mx-auto p-6 space-y-3">
+                {currentLines.map((line, index) => (
                     <motion.div
                         key={line.id}
-                        initial={{ opacity: 0, x: -10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: Math.min(index * 0.01, 2) }}
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: Math.min(index * 0.02, 0.5) }}
                         className="group relative"
                     >
                         <div className="absolute -left-12 top-4 text-[10px] font-mono text-slate-600 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -420,7 +216,7 @@ export default function Editor() {
                                 </span>
                                 {showOriginal && (
                                     <span className="text-[10px] font-medium text-blue-500/70 uppercase tracking-wider">
-                                        English Reference
+                                        English
                                     </span>
                                 )}
                             </div>
@@ -442,6 +238,50 @@ export default function Editor() {
                     </motion.div>
                 ))}
             </div>
+
+            {/* Pagination */}
+            {totalPages > 1 && (
+                <div className="sticky bottom-0 bg-slate-900/90 backdrop-blur-xl border-t border-slate-800/50">
+                    <div className="max-w-5xl mx-auto px-6 py-3 flex items-center justify-between">
+                        <button
+                            onClick={() => goToPage(currentPage - 1)}
+                            disabled={currentPage === 1}
+                            className="flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium bg-white/5 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                        >
+                            <ChevronLeft className="size-4" />
+                            Previous
+                        </button>
+
+                        <div className="flex items-center gap-1">
+                            {getPageNumbers().map((page, i) =>
+                                typeof page === "string" ? (
+                                    <span key={`dots-${i}`} className="px-2 text-slate-600 text-sm">…</span>
+                                ) : (
+                                    <button
+                                        key={page}
+                                        onClick={() => goToPage(page)}
+                                        className={`min-w-[36px] h-9 rounded-lg text-sm font-medium transition-all ${currentPage === page
+                                                ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20"
+                                                : "bg-white/5 text-slate-400 hover:bg-white/10"
+                                            }`}
+                                    >
+                                        {page}
+                                    </button>
+                                )
+                            )}
+                        </div>
+
+                        <button
+                            onClick={() => goToPage(currentPage + 1)}
+                            disabled={currentPage === totalPages}
+                            className="flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium bg-white/5 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                        >
+                            Next
+                            <ChevronRight className="size-4" />
+                        </button>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

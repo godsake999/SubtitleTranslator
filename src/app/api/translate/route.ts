@@ -87,14 +87,18 @@ export async function POST(request: Request) {
 
                 try {
                     const translations = await translateToBurmese(englishTexts);
+
+                    // Check if translations actually have content
+                    const hasContent = translations.some(t => t && t.trim().length > 0);
+
                     for (let j = 0; j < translations.length; j++) {
                         if (translatedLines[startLine + j]) {
                             translatedLines[startLine + j].burmese = translations[j];
                         }
                     }
 
-                    // Mark batch as complete
-                    batchDetails[batchIdx].status = 'complete';
+                    // Mark batch as complete (or failed if empty)
+                    batchDetails[batchIdx].status = hasContent ? 'complete' : 'failed';
                     await collection.updateOne(
                         { _id: subtitleId },
                         {
@@ -105,14 +109,21 @@ export async function POST(request: Request) {
                             }
                         }
                     );
-                    console.log(`[Background] Batch ${batchIdx + 1}/${totalBatches} complete for ${movieTitle}`);
+                    console.log(`[Background] Batch ${batchIdx + 1}/${totalBatches} ${hasContent ? 'complete' : 'empty'} for ${movieTitle}`);
+
+                    // Delay between batches to avoid Gemini rate-limiting
+                    if (batchIdx < totalBatches - 1) {
+                        await new Promise(resolve => setTimeout(resolve, 1500));
+                    }
                 } catch (err) {
                     batchDetails[batchIdx].status = 'failed';
                     await collection.updateOne(
                         { _id: subtitleId },
-                        { $set: { batchDetails } }
+                        { $set: { batchDetails, completedBatches: batchIdx + 1 } }
                     );
                     console.error(`[Background] Batch ${batchIdx} failed for ${movieTitle}:`, err);
+                    // Still add delay before next batch
+                    await new Promise(resolve => setTimeout(resolve, 2000));
                 }
             }
 
