@@ -16,9 +16,8 @@ export const translationModel = genAI.getGenerativeModel({
         topP: 0.95,
         topK: 40,
         maxOutputTokens: 8192,
-        responseMimeType: "application/json",
     },
-}, { apiVersion: "v1" }); // Explicitly use v1 instead of v1beta
+});
 
 export async function translateToBurmese(textList: string[]) {
     const prompt = `
