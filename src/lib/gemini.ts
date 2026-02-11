@@ -17,7 +17,7 @@ export const translationModel = genAI.getGenerativeModel({
         topK: 40,
         maxOutputTokens: 8192,
     },
-});
+}, { apiVersion: "v1" }); // Use v1 to avoid 404, but keep responseMimeType removed to avoid 400
 
 export async function translateToBurmese(textList: string[]) {
     const prompt = `
