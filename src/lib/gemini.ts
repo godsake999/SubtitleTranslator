@@ -6,8 +6,11 @@ if (!process.env.GEMINI_API_KEY) {
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
+// Log API Key presence (masked for safety)
+console.log(`Gemini API Key loaded: ${process.env.GEMINI_API_KEY ? process.env.GEMINI_API_KEY.slice(0, 4) + "..." : "MISSING"}`);
+
 export const translationModel = genAI.getGenerativeModel({
-    model: "gemini-1.5-flash-latest", // Using latest tracking version
+    model: "gemini-1.5-flash",
     generationConfig: {
         temperature: 0,
         topP: 0.95,
@@ -15,7 +18,7 @@ export const translationModel = genAI.getGenerativeModel({
         maxOutputTokens: 8192,
         responseMimeType: "application/json",
     },
-});
+}, { apiVersion: "v1" }); // Explicitly use v1 instead of v1beta
 
 export async function translateToBurmese(textList: string[]) {
     const prompt = `
