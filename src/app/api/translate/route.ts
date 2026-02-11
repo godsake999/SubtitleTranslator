@@ -36,7 +36,7 @@ export async function POST(request: Request) {
         const subtitleId = initialResult.insertedId;
 
         // Start translation in background (Non-blocking)
-        const batchSize = 100;
+        const batchSize = 25; // Small batches: Burmese Unicode is ~4x more token-heavy than English
         const translatedLines = [...lines];
         const maxAutoTranslate = 1000;
         const totalToTranslate = Math.min(lines.length, maxAutoTranslate);

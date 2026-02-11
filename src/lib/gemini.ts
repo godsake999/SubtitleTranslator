@@ -15,45 +15,69 @@ export const translationModel = genAI.getGenerativeModel({
         temperature: 0,
         topP: 0.95,
         topK: 40,
-        maxOutputTokens: 8192,
+        maxOutputTokens: 65536, // Burmese Unicode is very token-heavy, need large output
     },
 });
 
-export async function translateToBurmese(textList: string[]) {
-    const prompt = `
-    You are a professional translator specializing in movie subtitles. 
-    Translate the following list of English subtitle lines into natural, conversational Burmese.
-    Ensure the translation fits the context of a movie.
-    Keep the meaning accurate and culturally relevant for Burmese audiences.
-    
-    Return the result as a JSON array of strings, in the same order as the input.
-    Input strings: ${JSON.stringify(textList)}
-    
-    Response format:
-    {
-      "translations": ["translated_line_1", "translated_line_2", ...]
-    }
-  `;
+export async function translateToBurmese(textList: string[]): Promise<string[]> {
+    const prompt = `You are a professional movie subtitle translator.
+Translate each English line below into natural, conversational Burmese.
+Keep translations concise (subtitle-appropriate length).
 
-    try {
-        console.log(`Sending batch of ${textList.length} lines to Gemini...`);
-        const result = await translationModel.generateContent(prompt);
-        const response = result.response;
-        let text = response.text();
+CRITICAL: Return ONLY valid JSON. No markdown, no explanation.
 
-        // Remove markdown formatting if present
-        text = text.replace(/```json/g, "").replace(/```/g, "").trim();
+Input: ${JSON.stringify(textList)}
 
-        const json = JSON.parse(text);
-        if (!json.translations || !Array.isArray(json.translations)) {
-            console.error("Invalid response format from Gemini:", text);
-            throw new Error("Invalid response format from Gemini");
+Return exactly this format:
+{"translations":["line1_in_burmese","line2_in_burmese"]}`;
+
+    const MAX_RETRIES = 2;
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        try {
+            console.log(`Sending batch of ${textList.length} lines to Gemini (attempt ${attempt + 1})...`);
+            const result = await translationModel.generateContent(prompt);
+            const response = result.response;
+            let text = response.text();
+
+            // Remove markdown code fences if present
+            text = text.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+
+            // Try to fix truncated JSON by closing any open arrays/objects
+            if (!text.endsWith("}")) {
+                // Find the last complete string in the array
+                const lastQuoteIdx = text.lastIndexOf('"');
+                if (lastQuoteIdx > 0) {
+                    text = text.substring(0, lastQuoteIdx + 1) + "]}";
+                    console.log("Warning: Fixed truncated JSON response");
+                }
+            }
+
+            const json = JSON.parse(text);
+            if (!json.translations || !Array.isArray(json.translations)) {
+                console.error("Invalid response format from Gemini:", text.substring(0, 200));
+                throw new Error("Invalid response format from Gemini");
+            }
+
+            console.log(`Successfully translated ${json.translations.length}/${textList.length} lines.`);
+
+            // If we got fewer translations than input, pad with empty strings
+            while (json.translations.length < textList.length) {
+                json.translations.push("");
+            }
+
+            return json.translations as string[];
+        } catch (error) {
+            console.error(`Gemini Translation Error (attempt ${attempt + 1}):`, error);
+            if (attempt === MAX_RETRIES) {
+                // Return empty strings instead of crashing
+                console.log("All retries failed, returning empty translations for this batch");
+                return textList.map(() => "");
+            }
+            // Wait a bit before retrying
+            await new Promise(resolve => setTimeout(resolve, 1000));
         }
-
-        console.log(`Successfully translated ${json.translations.length} lines.`);
-        return json.translations as string[];
-    } catch (error) {
-        console.error("Gemini Translation Error Details:", error);
-        throw error;
     }
+
+    return textList.map(() => "");
 }
