@@ -7,7 +7,7 @@ if (!process.env.GEMINI_API_KEY) {
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 export const translationModel = genAI.getGenerativeModel({
-    model: "gemini-1.5-flash", // Try the standard identifier
+    model: "gemini-1.5-flash-latest", // Using latest tracking version
     generationConfig: {
         temperature: 0,
         topP: 0.95,

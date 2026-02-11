@@ -35,33 +35,40 @@ export async function POST(request: Request) {
         });
         const subtitleId = initialResult.insertedId;
 
-        // Batch translation in background
+        // Start translation in background (Non-blocking)
         const batchSize = 100;
         const translatedLines = [...lines];
         const maxAutoTranslate = 1000;
         const totalToTranslate = Math.min(lines.length, maxAutoTranslate);
 
-        for (let i = 0; i < totalToTranslate; i += batchSize) {
-            const batch = lines.slice(i, i + batchSize);
-            const englishTexts = batch.map(b => b.english);
-            try {
-                const translations = await translateToBurmese(englishTexts);
-                for (let j = 0; j < translations.length; j++) {
-                    if (translatedLines[i + j]) {
-                        translatedLines[i + j].burmese = translations[j];
+        // This promise is not awaited, so we return the ID to the client immediately
+        (async () => {
+            console.log(`[Background] Starting translation for ${movieTitle}...`);
+            for (let i = 0; i < totalToTranslate; i += batchSize) {
+                const batch = lines.slice(i, i + batchSize);
+                const englishTexts = batch.map(b => b.english);
+                try {
+                    const translations = await translateToBurmese(englishTexts);
+                    for (let j = 0; j < translations.length; j++) {
+                        if (translatedLines[i + j]) {
+                            translatedLines[i + j].burmese = translations[j];
+                        }
                     }
-                }
 
-                // Update DB after each successful batch to show progress
-                await collection.updateOne(
-                    { _id: subtitleId },
-                    { $set: { lines: translatedLines } }
-                );
-                console.log(`Updated DB with batch ${i}`);
-            } catch (err) {
-                console.error(`Batch ${i} failed, skipping...`, err);
+                    // Update DB after each successful batch
+                    const client = await clientPromise;
+                    const db = client.db('subtitle_db');
+                    await db.collection('subtitles').updateOne(
+                        { _id: subtitleId },
+                        { $set: { lines: translatedLines } }
+                    );
+                    console.log(`[Background] Updated DB with batch ${i} for ${movieTitle}`);
+                } catch (err) {
+                    console.error(`[Background] Batch ${i} failed for ${movieTitle}:`, err);
+                }
             }
-        }
+            console.log(`[Background] Completed translation for ${movieTitle}`);
+        })().catch(err => console.error("Background task error:", err));
 
         return NextResponse.json({ id: subtitleId, status: 'new' });
     } catch (error) {
