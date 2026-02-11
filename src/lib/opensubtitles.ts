@@ -23,8 +23,8 @@ export async function searchSubtitles(query: string) {
 
     const response = await fetch(`${OPENSUBTITLES_API_URL}/subtitles?query=${encodeURIComponent(query)}&languages=en`, {
         headers: {
-            "Api-Key": apiKey,
-            "User-Agent": userAgent,
+            "Api-Key": apiKey || "",
+            "User-Agent": userAgent || "",
             "Content-Type": "application/json",
         },
     });
@@ -46,8 +46,8 @@ export async function downloadSubtitle(fileId: number) {
     const response = await fetch(`${OPENSUBTITLES_API_URL}/download`, {
         method: "POST",
         headers: {
-            "Api-Key": apiKey,
-            "User-Agent": userAgent,
+            "Api-Key": apiKey || "",
+            "User-Agent": userAgent || "",
             "Content-Type": "application/json",
         },
         body: JSON.stringify({ file_id: fileId }),
