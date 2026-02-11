@@ -10,14 +10,14 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 console.log(`Gemini API Key loaded: ${process.env.GEMINI_API_KEY ? process.env.GEMINI_API_KEY.slice(0, 4) + "..." : "MISSING"}`);
 
 export const translationModel = genAI.getGenerativeModel({
-    model: "gemini-1.5-flash",
+    model: "gemini-2.5-flash",
     generationConfig: {
         temperature: 0,
         topP: 0.95,
         topK: 40,
         maxOutputTokens: 8192,
     },
-}, { apiVersion: "v1" }); // Use v1 to avoid 404, but keep responseMimeType removed to avoid 400
+});
 
 export async function translateToBurmese(textList: string[]) {
     const prompt = `
