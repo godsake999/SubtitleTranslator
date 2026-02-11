@@ -26,16 +26,18 @@ export async function POST(request: Request) {
         const srtContent = await downloadSubtitle(fileId);
         const lines = srtToJson(srtContent);
 
-        // Initial Database Entry (without translation yet if it takes too long)
-        // But the requirements say "translate the whole batch before the user even sees the screen"
-        // So we translate now.
+        // Initial Database Entry (without translation yet)
+        const initialResult = await collection.insertOne({
+            movieTitle,
+            imdbId,
+            lines,
+            createdAt: new Date(),
+        });
+        const subtitleId = initialResult.insertedId;
 
-        // Batch translation to avoid Gemini token/length limits
-        const batchSize = 100; // Increased for speed
+        // Batch translation in background
+        const batchSize = 100;
         const translatedLines = [...lines];
-
-        // Only translate the first 1000 lines automatically to avoid server timeout.
-        // The user can edit the rest manually or we can add a "Continue Translation" button later.
         const maxAutoTranslate = 1000;
         const totalToTranslate = Math.min(lines.length, maxAutoTranslate);
 
@@ -49,20 +51,19 @@ export async function POST(request: Request) {
                         translatedLines[i + j].burmese = translations[j];
                     }
                 }
+
+                // Update DB after each successful batch to show progress
+                await collection.updateOne(
+                    { _id: subtitleId },
+                    { $set: { lines: translatedLines } }
+                );
+                console.log(`Updated DB with batch ${i}`);
             } catch (err) {
                 console.error(`Batch ${i} failed, skipping...`, err);
-                // Continue to next batch instead of failing whole process
             }
         }
 
-        const result = await collection.insertOne({
-            movieTitle,
-            imdbId,
-            lines: translatedLines,
-            createdAt: new Date(),
-        });
-
-        return NextResponse.json({ id: result.insertedId, status: 'new' });
+        return NextResponse.json({ id: subtitleId, status: 'new' });
     } catch (error) {
         console.error('Translation process error:', error);
         return NextResponse.json({ error: 'Failed to process translation' }, { status: 500 });
