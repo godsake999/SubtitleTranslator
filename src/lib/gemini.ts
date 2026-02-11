@@ -34,13 +34,24 @@ export async function translateToBurmese(textList: string[]) {
   `;
 
     try {
+        console.log(`Sending batch of ${textList.length} lines to Gemini...`);
         const result = await translationModel.generateContent(prompt);
         const response = result.response;
-        const text = response.text();
+        let text = response.text();
+
+        // Remove markdown formatting if present
+        text = text.replace(/```json/g, "").replace(/```/g, "").trim();
+
         const json = JSON.parse(text);
+        if (!json.translations || !Array.isArray(json.translations)) {
+            console.error("Invalid response format from Gemini:", text);
+            throw new Error("Invalid response format from Gemini");
+        }
+
+        console.log(`Successfully translated ${json.translations.length} lines.`);
         return json.translations as string[];
     } catch (error) {
-        console.error("Translation error:", error);
+        console.error("Gemini Translation Error Details:", error);
         throw error;
     }
 }
